@@ -68,6 +68,8 @@ def evaluate(model, testloader):
     print('F1 on test images: %d %%' % F1)
     print('Specificty on test images: %d %%' % specificity)
 
+    return accuracy, precision, recall, F1, specificity 
+
 
 
     
