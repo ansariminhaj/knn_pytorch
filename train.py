@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
+from load_dataset import create_dataloaders
 
 # "input_shape":[2048,12]
 # This means 12 ECG nodes, 2048 time steps
@@ -76,108 +77,75 @@ class Net(nn.Module):
         x = self.decoder(x)
         return x
 
-net = Net()
-net.to(device)
 
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(net.parameters(), lr=0.0002, weight_decay=1e-4)
+def train(train_dataloader, val_dataloader, config):
+    net = Net()
+    net.to(device)
 
-def build_unet(config): # not a unet this is our modified 12 lead weston network
-    import keras
-    from keras.layers import Conv1D, BatchNormalization, Add, MaxPooling1D
-    from keras.optimizers import Adam
-    from keras.layers.core import Dense, Activation, Flatten
-    from keras.models import Model
-    from keras.layers import Input
-    from keras.layers import Dropout
-    
-    
-    inputs = Input(shape=params['input_shape'],
-                   dtype='float32',
-                   name='inputs')
-    
-    r = lambda: keras.regularizers.l2(config["l2_kern_weight"])
+    criterion = nn.BCELoss()
+    optimizer = optim.Adam(net.parameters(), lr=config["learning_rate"], weight_decay=1e-4)
 
-    layer = nn.Conv1d(
-             filters=config["conv_num_filters_start"],
-             kernel_size=config["conv_filter_length"],
-             stride=1,
-             padding='same', 
-             kernel_regularizer=r(), 
-            # weston does not use kernel initalizer 
-             kernel_initializer=params["conv_init"])(inputs)
-    
-    layer = BatchNormalization()(layer)
-    layer = Activation(params["conv_activation"])(layer)
+    # get the inputs; data is a dict {'image', 'labels'}
+    for epoch in range(config['epoch']):  
+        count_t=0
+        count_v=0
+        
+        running_loss = 0.0
+        for i, data in enumerate(trainloader, 0):
+            net.train()
 
-    layer2 = Conv1D(
-             filters=params["conv_num_filters_start"],
-             kernel_size=params["conv_filter_length"],
-             strides=1,
-             padding='same', 
-             kernel_regularizer=r(), 
-            # weston does not use kernel initalizer 
-             kernel_initializer=params["conv_init"])(layer)
-
-    layer2 = BatchNormalization()(layer2)
-    layer2 = Activation(params["conv_activation"])(layer2)
-    layer2 = Dropout(params["conv_dropout"])(layer2)
-    layer2 = Conv1D(
-                 filters=params["conv_num_filters_start"],
-                 kernel_size=params["conv_filter_length"],
-                 strides=1,
-                 padding='same', 
-                 kernel_regularizer=r(), 
-                # weston does not use kernel initalizer 
-                 kernel_initializer=params["conv_init"])(layer2)
-    
-    layer = Add()([layer,layer2])
-    # x = tf.layers.max_pooling1d(x, pool_size=2, strides=2, padding='same')
-    layer = MaxPooling1D(pool_size=2, strides=2,padding='same')(layer)
-    
-    for i in range(1, 1 + params["num_middle_layers"]):
-        layer2 = layer
-        n_filters = params["conv_num_filters_start"] * 2 ** (i // params["conv_increase_channels_at"])
-
-        for j in range(params["num_convs_per_layer"]):
-            layer2 = BatchNormalization()(layer2)
-            layer2 = Activation(params["conv_activation"])(layer2)
-            layer2 = Dropout(params["conv_dropout"])(layer2)
-            layer2 = Conv1D(
-                 filters=n_filters,
-                 kernel_size=params["conv_filter_length"],
-                 strides=1,
-                 padding='same', 
-                 kernel_regularizer=r(), 
-                 kernel_initializer=params["conv_init"])(layer2)
+            inputs, labels = data['image'].to(device), data['labels'].to(device)
             
-        if i % params["conv_increase_channels_at"] == 0:
-            layer = layer2
+            optimizer.zero_grad()
+            outputs = net(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+            count_t+=1
+            
+        train_loss.append(running_loss/count_t)
+        print("Epoch ", epoch, "Train loss: ",running_loss/count_t)
+                
+        running_loss_v = 0.0     
+        for i_v, data_v in enumerate(testloader, 0):
+            net.eval()
+            inputs_v, labels_v = data_v[0].to(device), data_v[1].to(device)
+
+            outputs_v = net(inputs_v)
+            loss_v = criterion(outputs_v, labels_v)
+
+            running_loss_v += loss_v.item()
+            count_v += 1 
+            
+        
+        val_loss.append(running_loss_v/count_v)
+        print("Epoch ", epoch, "Val loss: ",running_loss_v/count_v)
+            
+        if len(val_loss) == 1:
+            print("Initial val loss saved\n")
+            torch.save(net.state_dict(), "weights/")
         else:
-            layer = Add()([layer,layer2])
+            if val_loss[-1] <= min(val_loss):
+                print("Val loss saved\n")
+                torch.save(net.state_dict(), "weights/"+str(epoch)+"_.pth")
+            else:
+                print("\n")
 
-        if i % params["conv_pool_at"] == 0:
-            # add padding = 'same'
-            layer = MaxPooling1D(pool_size=2,strides=2,padding='same')(layer)
-
-    layer = BatchNormalization()(layer)
-    layer = Activation(params["conv_activation"])(layer)
-    layer = Flatten()(layer)
-    for i in range(params["hidden_layers"]):
-        layer = Dense(params["hidden_size"])(layer)
-
-    layer = Dense(params["num_categories"])(layer)
+    print('Finished Training')
+    return net
     
-    output = Activation("sigmoid")(layer)
-    
-    model = Model(inputs=[inputs], outputs=[output])
 
-    optimizer = Adam(
-        lr=params["learning_rate"],
-        clipnorm=params.get("clipnorm", 1))
-
-    model.compile(loss='binary_crossentropy',
-                  optimizer=optimizer,
-                  metrics=['acc', f1_score])
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config_file", help="path to config file")
     
-    return model
+    config = read_config(sys.argv[1])
+
+    train_dataloader, test_dataloader, val_dataloader = create_dataloaders(config)
+    
+    model = train(train_dataloader, val_dataloader, config)
+    
+
+
