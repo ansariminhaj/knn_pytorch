@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from load_dataset import create_dataloaders
+from evaluate import evaluate
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # "input_shape":[2048,12]
@@ -136,7 +137,6 @@ def train(train_dataloader, val_dataloader, config):
                 print("\n")
 
     print('Finished Training')
-    return net
     
 
 if __name__ == '__main__':
@@ -147,7 +147,15 @@ if __name__ == '__main__':
 
     train_dataloader, test_dataloader, val_dataloader = create_dataloaders(config)
     
-    model = train(train_dataloader, val_dataloader, config)
+    train(train_dataloader, val_dataloader, config)
+
+    #Load best model
+    net1_loaded = Net()
+    net1_loaded.cuda()
+    net1_loaded.load_state_dict(torch.load("weights/w.pth"))
+
+    acc, precision, recall, f1, specificity = evaluate(net1_loaded, testloader)
+    
     
 
 
