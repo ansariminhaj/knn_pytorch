@@ -1,6 +1,8 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from load_dataset import create_dataloaders
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # "input_shape":[2048,12]
 # This means 12 ECG nodes, 2048 time steps
