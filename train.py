@@ -23,64 +23,57 @@ def layerB(in_channels, out_channels, activation, dropout, *args, **kwargs):
         nn.Dropout(p=dropout)
     )
 
-# Only Conv
-def layerC(in_channels, out_channels, *args, **kwargs):
-    return nn.Sequential(
-        nn.Conv1d(in_channels, out_channels, *args, **kwargs)
-    )
-
 class Net(nn.Module):
     def __init__(self, config):
         super().__init__()
         
-        # Channels in = 12
-        self.layerA = layerA(config['input_shape'][0], config['conv_num_filters_start'], config['conv_activation'],
-                                     kernel_size=config['conv_filter_length'], padding=same, stride=1)      
-        
-        self.layerB = layerB(config['conv_num_filters_start'], config['conv_num_filters_start'], config['conv_activation'],
-                                 config['conv_dropout'], kernel_size=config['conv_filter_length'], padding=same, stride=1)
+        def encoderFunction():
 
-        self.layerC = layerC(config['conv_num_filters_start'], config['conv_num_filters_start'],
-                             kernel_size=config['conv_filter_length'], padding=same, stride=1)
+            layer = [layerA(config['input_shape'][0], config['conv_num_filters_start'], config['conv_activation'],
+                                         kernel_size=config['conv_filter_length'], padding='same', stride=1),
+                      layerB(config['conv_num_filters_start'], config['conv_num_filters_start'], config['conv_activation'],
+                             config['conv_dropout'], kernel_size=config['conv_filter_length'], padding='same', stride=1),
+                      layerB(config['conv_num_filters_start'], config['conv_num_filters_start'], config['conv_activation'],
+                             config['conv_dropout'], kernel_size=config['conv_filter_length'], padding='same', stride=1)]
+            
+            for i in range(1, 1 + params["num_middle_layers"]):
+                layer2 = layer
+
+                filter_multiple = 2 ** (i // config["conv_increase_channels_at"])
+                n_filters = config["conv_num_filters_start"] * filter_multiple
+                
+                for j in range(config["num_convs_per_layer"]):
+                    layer2.append(layerB( n_filters / filter_multiple, n_filters, kernel_size=config['conv_filter_length'], padding='same'))
+
+                if i % config["conv_increase_channels_at"] == 0:
+                    layer = layer2
+                else:
+                    layer = [layer, layer2]
+
+                if i % config["conv_pool_at"] == 0:
+                    layer.append(nn.MaxPool1d(2, stride=2, paddng='same'))
+                    
+            return layer
+
+        def decoderFunction():
+
+            layer = []
+            layer.append(nn.Flatten(start_dim = 0, end_dim = -1))
+
+            for i in range(config["hidden_layers"]):
+                layer.append(nn.Linear(x.shape[0], config["hidden_size"]))
+
+            layer.append(nn.Linear(x.shape[0], config["num_categories"]))
+            layer.append(nn.Sigmoid())
+
+            return layer
         
-        
-        self.pool = nn.MaxPool1d(2, 2)
-        
-        # fully conected layers:
-        self.fc15 = nn.Linear(25088, 4096)
-        self.fc16 = nn.Linear(4096, 512)
-        self.fc17 = nn.Linear(512, 2)
+        self.encoder = nn.Sequential(*encoderFunction())
+        self.decoder = nn.Sequential(*decoderFunction())
 
     def forward(self, x):
-        x = self.conv_block1(x)
-        x = self.conv_block2(x)
-        x = self.conv_block2(x)
-        
-        x = self.conv0(x)
-        x = F.relu(self.conv0_bn(x))
-#         x = self.dropout(x)
-        x= self.pool(x)
-        
-        x = self.conv1(x)
-        x = F.relu(self.conv1_bn(x))
-#         x = self.dropout(x)
-        x= self.pool(x)
-        
-        x = self.conv3(x)
-        x = F.relu(self.conv3_bn(x))
-#         x = self.dropout(x)
-        x= self.pool(x)
-        
-        x = self.conv5(x)
-        x = F.relu(self.conv5_bn(x))
-#         x = self.dropout(x)   
-        x = self.pool(x)
-
-        x = x.reshape(-1, 25088)
-        x = F.relu(self.fc15(x))
-#         x = self.dropout(x)
-        x = F.relu(self.fc16(x))
-        x = self.fc17(x)
+        x = self.encoder(x)
+        x = self.decoder(x)
         return x
 
 net = Net()
