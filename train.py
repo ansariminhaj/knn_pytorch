@@ -13,7 +13,7 @@ def layerA(in_channels, out_channels, activation, *args, **kwargs):
     activation_function = getattr(nn, activation)() 
     return nn.Sequential(
         nn.Conv1d(in_channels, out_channels, *args, **kwargs),
-        nn.BatchNorm1d(out_f),
+        nn.BatchNorm1d(out_channels),
         activation_function
     )
 
@@ -22,7 +22,7 @@ def layerB(in_channels, out_channels, activation, dropout, *args, **kwargs):
     activation_function = getattr(nn, activation)() 
     return nn.Sequential(
         nn.Conv1d(in_channels, out_channels, *args, **kwargs),
-        nn.BatchNorm1d(out_f),
+        nn.BatchNorm1d(out_channels),
         activation_function,
         nn.Dropout(p=dropout)
     )
@@ -62,7 +62,7 @@ class Net(nn.Module):
         def decoderFunction():
 
             layer = []
-            layer.append(nn.Flatten(start_dim = 0, end_dim = -1))
+            layer.append(nn.Flatten())
 
             for i in range(config["hidden_layers"]):
                 layer.append(nn.Linear(x.shape[0], config["hidden_size"]))
